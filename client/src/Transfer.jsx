@@ -1,5 +1,8 @@
 import { useState } from "react";
 import server from "./server";
+import { keccak256 } from "ethereum-cryptography/keccak";
+import * as secp from "ethereum-cryptography/secp256k1";
+import { utf8ToBytes, toHex } from "ethereum-cryptography/utils";
 
 function Transfer({ address, setBalance }) {
   const [sendAmount, setSendAmount] = useState("");
@@ -7,20 +10,37 @@ function Transfer({ address, setBalance }) {
 
   const setValue = (setter) => (evt) => setter(evt.target.value);
 
+  // this will create a signed transaction that we will send to the client from which
+  // we will recover the public key
+  const createSignature = async (address, recipient, amount) => {
+    const tnx = `Send ${amount} from ${address} to ${recipient}`;
+    const byteTxn = utf8ToBytes(tnx);
+    const hashedTnx = toHex(keccak256(byteTxn));
+    const signature = await secp.sign(hashedTnx, address);
+    const hashedSig = toHex(signature);
+
+    return {
+      msg: tnx,
+      signature: hashedSig,
+    };
+  };
+
   async function transfer(evt) {
     evt.preventDefault();
 
     try {
+      const signature = await createSignature(address, recipient, sendAmount);
       const {
         data: { balance },
       } = await server.post(`send`, {
-        sender: address,
+        sender: toHex(secp.getPublicKey(address)),
         amount: parseInt(sendAmount),
+        signature: signature,
         recipient,
       });
       setBalance(balance);
     } catch (ex) {
-      alert(ex.response.data.message);
+      console.log(ex);
     }
   }
 
@@ -38,7 +58,7 @@ function Transfer({ address, setBalance }) {
       </label>
 
       <label>
-        Recipient
+        Recipient (Public Addresss)
         <input
           placeholder="Type an address, for example: 0x2"
           value={recipient}
